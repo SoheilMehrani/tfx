@@ -763,7 +763,7 @@ def _orchestrate_update_initiated_pipeline(
         node_state.update(pstate.NodeState.PAUSED, node_state.status)
 
   # If all the pausable nodes have been paused, we can update the node state to
-  # STARTED.
+  # STARTING.
   all_paused = set(n.node_info.id for n in nodes_to_pause) == set(
       n.node_info.id for n in paused_nodes)
   if all_paused:
@@ -986,6 +986,8 @@ def _maybe_enqueue_cancellation_task(mlmd_handle: metadata.Metadata,
     with pipeline_state:
       node_state = pipeline_state.get_node_state(node_uid)
       if node_state.state == pstate.NodeState.PAUSING and exec_node_task:
+        logging.error('Guowei _maybe_enqueue_cancellation_task: %s',
+                      exec_node_task)
         task_queue.enqueue(exec_node_task)
         return True
   return False

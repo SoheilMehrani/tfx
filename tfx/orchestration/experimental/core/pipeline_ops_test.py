@@ -913,7 +913,7 @@ class PipelineOpsTest(test_utils.TfxTest, parameterized.TestCase):
       node_states_dict = pstate._get_node_states_dict(execution)
       self.assertLen(node_states_dict, 4)
       self.assertSetEqual(
-          set([pstate.NodeState.STARTED]),
+          set([pstate.NodeState.STARTING]),
           set(n.state for n in node_states_dict.values()))
 
       # Pipeline should no longer be in update-initiated state but be active.
@@ -1120,12 +1120,12 @@ class PipelineOpsTest(test_utils.TfxTest, parameterized.TestCase):
       self._mock_service_job_manager.stop_node_services.assert_has_calls(
           [mock.call(mock.ANY, 'Transform')])
 
-      # Check that the node states are STARTED.
+      # Check that the node states are STARTING.
       [execution] = m.store.get_executions_by_id([pipeline_state.execution_id])
       node_states_dict = pstate._get_node_states_dict(execution)
       self.assertLen(node_states_dict, 4)
       self.assertSetEqual(
-          set([pstate.NodeState.STARTED]),
+          set([pstate.NodeState.STARTING]),
           set(n.state for n in node_states_dict.values()))
 
       # Pipeline should no longer be in update-initiated state but be active.
