@@ -50,8 +50,8 @@ class PenguinPipelineLocalEndToEndTest(tf.test.TestCase,
         os.path.dirname(__file__), 'schema', 'user_provided', 'schema.pbtxt')
     self._data_root = os.path.join(os.path.dirname(__file__), 'data')
 
-    # Create a data root for rolling window test
-    # - data/labelled
+    # Create a data root for rolling window test and feature skew test
+    # - data/labelled | data/skewed
     #   - day1
     #     - penguins_processed.csv
     #   - day2
@@ -61,10 +61,15 @@ class PenguinPipelineLocalEndToEndTest(tf.test.TestCase,
     self._data_root_span = os.path.join(self._test_dir, 'data')
     for day in ['day1', 'day2', 'day3']:
       dst_path = os.path.join(self._data_root_span, 'labelled', day)
+      skewed_dst_path = os.path.join(self._data_root_span, 'skewed', day)
       fileio.makedirs(dst_path)
+      fileio.makedirs(skewed_dst_path)
       fileio.copy(
           os.path.join(self._data_root, 'labelled', 'penguins_processed.csv'),
           os.path.join(dst_path, 'penguins_processed.csv'))
+      fileio.copy(
+          os.path.join(self._data_root, 'skewed', 'penguins_processed.csv'),
+          os.path.join(skewed_dst_path, 'penguins_processed.csv'))
 
     self._serving_model_dir = os.path.join(self._test_dir, 'serving_model')
     self._pipeline_root = os.path.join(self._test_dir, 'tfx', 'pipelines',
@@ -136,7 +141,8 @@ class PenguinPipelineLocalEndToEndTest(tf.test.TestCase,
         examplegen_range_config_date=None,
         resolver_range_config=None,
         beam_pipeline_args=self._make_beam_pipeline_args(),
-        enable_transform_input_cache=False)
+        enable_transform_input_cache=False,
+        enable_example_diff=False)
 
     logging.info('Starting the first pipeline run.')
     LocalDagRunner().run(pipeline)
@@ -191,7 +197,8 @@ class PenguinPipelineLocalEndToEndTest(tf.test.TestCase,
             examplegen_range_config_date=None,
             resolver_range_config=None,
             beam_pipeline_args=self._make_beam_pipeline_args(),
-            enable_transform_input_cache=False))
+            enable_transform_input_cache=False,
+            enable_example_diff=False))
 
     self.assertTrue(fileio.exists(self._serving_model_dir))
     self.assertTrue(fileio.exists(self._metadata_path))
@@ -232,7 +239,8 @@ class PenguinPipelineLocalEndToEndTest(tf.test.TestCase,
             examplegen_range_config_date=None,
             resolver_range_config=None,
             beam_pipeline_args=[],
-            enable_transform_input_cache=False))
+            enable_transform_input_cache=False,
+            enable_example_diff=False))
 
     self.assertTrue(fileio.exists(self._serving_model_dir))
     self.assertTrue(fileio.exists(self._metadata_path))
@@ -265,7 +273,8 @@ class PenguinPipelineLocalEndToEndTest(tf.test.TestCase,
             examplegen_range_config_date=None,
             resolver_range_config=None,
             beam_pipeline_args=[],
-            enable_transform_input_cache=False))
+            enable_transform_input_cache=False,
+            enable_example_diff=False))
 
     self.assertTrue(fileio.exists(self._serving_model_dir))
     self.assertTrue(fileio.exists(self._metadata_path))
@@ -320,7 +329,8 @@ class PenguinPipelineLocalEndToEndTest(tf.test.TestCase,
               examplegen_range_config_date=examplegen_range_config_date,
               resolver_range_config=resolver_range_config,
               beam_pipeline_args=self._make_beam_pipeline_args(),
-              enable_transform_input_cache=True))
+              enable_transform_input_cache=True,
+              enable_example_diff=False))
 
     # Trigger the pipeline for the first span.
     run_pipeline(examplegen_range_config_date='20220102')
@@ -398,6 +408,46 @@ class PenguinPipelineLocalEndToEndTest(tf.test.TestCase,
         self._get_input_examples_artifacts(store, trainer_execution_type),
         2)
 
+  def testPenguinPipelineLocalWithExampleDiff(self):
+    module_file = self._module_file_name('keras')
+    examplegen_input_config = proto.Input(splits=[
+        proto.Input.Split(name='test', pattern='day{SPAN}/*'),
+    ])
+    resolver_range_config = proto.RangeConfig(
+        rolling_range=proto.RollingRange(num_spans=2))
+
+    def run_pipeline(examplegen_range_config_date):
+      LocalDagRunner().run(
+          penguin_pipeline_local.create_pipeline(
+              pipeline_name=self._pipeline_name,
+              data_root=self._data_root_span,
+              module_file=module_file,
+              accuracy_threshold=0.1,
+              serving_model_dir=self._serving_model_dir,
+              pipeline_root=self._pipeline_root,
+              metadata_path=self._metadata_path,
+              user_provided_schema_path=None,
+              enable_tuning=False,
+              enable_bulk_inferrer=False,
+              examplegen_input_config=examplegen_input_config,
+              examplegen_range_config_date=examplegen_range_config_date,
+              resolver_range_config=resolver_range_config,
+              beam_pipeline_args=self._make_beam_pipeline_args(),
+              enable_transform_input_cache=True,
+              enable_example_diff=True))
+
+    # Trigger the pipeline for the first span.
+    run_pipeline(examplegen_range_config_date='20220102')
+    self.assertTrue(fileio.exists(self._serving_model_dir))
+    self.assertTrue(fileio.exists(self._metadata_path))
+    self.assertPipelineExecution()
+    expected_execution_count = 14  # 10 components + 4 resolvers
+    metadata_config = metadata.sqlite_metadata_connection_config(
+        self._metadata_path)
+    store = mlmd.MetadataStore(metadata_config)
+    execution_count = len(store.get_executions())
+    self.assertEqual(expected_execution_count, execution_count)
+
   def testPenguinPipelineLocalConditionalWithoutPusher(self):
     module_file = self._module_file_name('keras')
     pipeline = penguin_pipeline_local.create_pipeline(
@@ -417,7 +467,8 @@ class PenguinPipelineLocalEndToEndTest(tf.test.TestCase,
         examplegen_range_config_date=None,
         resolver_range_config=None,
         beam_pipeline_args=self._make_beam_pipeline_args(),
-        enable_transform_input_cache=False)
+        enable_transform_input_cache=False,
+        enable_example_diff=False)
 
     logging.info('Starting the first pipeline run.')
     LocalDagRunner().run(pipeline)

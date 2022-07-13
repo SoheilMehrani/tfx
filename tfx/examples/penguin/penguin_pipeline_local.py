@@ -150,6 +150,7 @@ def create_pipeline(  # pylint: disable=invalid-name
     user_provided_schema_path: Optional[str],
     enable_tuning: bool,
     enable_bulk_inferrer: bool,
+    enable_example_diff: Optional[bool],
     examplegen_input_config: Optional[tfx.proto.Input],
     examplegen_range_config_date: Optional[str],
     resolver_range_config: Optional[tfx.proto.RangeConfig],
@@ -171,6 +172,7 @@ def create_pipeline(  # pylint: disable=invalid-name
       enabled.
     enable_bulk_inferrer: If True, the generated model will be used for a
       batch inference.
+    enable_example_diff: If True, perform the feature skew detection.
     examplegen_input_config: ExampleGen's input_config.
     examplegen_range_config_date: date to generate the range_config to
       ExampleGen.
@@ -364,6 +366,32 @@ def create_pipeline(  # pylint: disable=invalid-name
         data_spec=tfx.proto.DataSpec(),
         model_spec=tfx.proto.ModelSpec())
 
+  if enable_example_diff:
+    skewed_data_example_gen = tfx.components.CsvExampleGen(
+        input_base=os.path.join(data_root, 'skewed'),
+        input_config=examplegen_input_config,
+        range_config=range_config).with_id('CsvExampleGen_Skewed')
+    skewed_data_resolver = tfx.dsl.Resolver(
+        strategy_class=tfx.dsl.experimental.SpanRangeStrategy,
+        config={
+            'range_config': resolver_range_config
+        },
+        examples=tfx.dsl.Channel(
+            type=tfx.types.standard_artifacts.Examples,
+            producer_component_id=skewed_data_example_gen.id)).with_id(
+                'skewed_span_resolver')
+    skewed_data_resolver.add_upstream_node(skewed_data_example_gen)
+    example_diff_config = tfx.proto.ExampleDiffConfig(
+        paired_example_skew=tfx.proto.PairedExampleSkew(
+            skew_sample_size=2, identifier_features=['culmen_length_mm']))
+    include_split_pairs = [('train', 'train'), ('train', 'eval')]
+    example_diff = tfx.components.ExampleDiff(
+        examples_test=examples_resolver.outputs['examples'],
+        examples_base=skewed_data_resolver.outputs['examples'],
+        config=example_diff_config,
+        include_split_pairs=include_split_pairs
+    )
+
   components_list = [
       example_gen,
       statistics_gen,
@@ -383,10 +411,12 @@ def create_pipeline(  # pylint: disable=invalid-name
   if enable_tuning:
     components_list.append(tuner)
   if enable_bulk_inferrer:
-    components_list.append(example_gen_unlabelled)
-    components_list.append(bulk_inferrer)
+    components_list.extend((example_gen_unlabelled, bulk_inferrer))
   if user_provided_schema_path:
     components_list.append(example_validator)
+  if enable_example_diff:
+    components_list.extend(
+        (skewed_data_example_gen, skewed_data_resolver, example_diff))
 
   return tfx.dsl.Pipeline(
       pipeline_name=pipeline_name,
@@ -437,4 +467,5 @@ if __name__ == '__main__':
           examplegen_range_config_date=_examplegen_range_config_date,
           resolver_range_config=_resolver_range_config,
           beam_pipeline_args=_beam_pipeline_args_by_runner[flags.FLAGS.runner],
-          enable_transform_input_cache=True))
+          enable_transform_input_cache=True,
+          enable_example_diff=False))
