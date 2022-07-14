@@ -684,8 +684,7 @@ class TransformProcessor:
           columns.
     """
 
-    if (self._IsDataFormatSequenceExample(data_format) or
-        self._IsDataFormatProto(data_format)):
+    if self._IsDataFormatProto(data_format):
       return dataset_metadata.DatasetMetadata(_RAW_EXAMPLE_SCHEMA)
     schema_proto = self._GetSchema(schema_path)
     return dataset_metadata.DatasetMetadata(schema_proto)
@@ -1200,7 +1199,8 @@ class TransformProcessor:
     for d in transform_data_list:
       d.tfxio = d.tfxio.Project(transform_input_columns)
 
-    desired_batch_size = self._GetDesiredBatchSize(raw_examples_data_format)
+    # desired_batch_size = self._GetDesiredBatchSize(raw_examples_data_format)
+    desired_batch_size = None
 
     with make_beam_pipeline_fn() as pipeline:
       with tft_beam.Context(
@@ -1315,34 +1315,38 @@ class TransformProcessor:
           if (not disable_statistics and
               not self._IsDataFormatProto(raw_examples_data_format)):
             # Aggregated feature stats before transformation.
-            if self._IsDataFormatSequenceExample(raw_examples_data_format):
-              schema_proto = None
-            else:
-              schema_proto = input_dataset_metadata.schema
+            # if self._IsDataFormatSequenceExample(raw_examples_data_format):
+            #   schema_proto = None
+            # else:
+            #   schema_proto = input_dataset_metadata.schema
+            schema_proto = input_dataset_metadata.schema
 
-            if self._IsDataFormatSequenceExample(raw_examples_data_format):
+            # if self._IsDataFormatSequenceExample(raw_examples_data_format):
 
-              def _ExtractRawExampleBatches(record_batch):
-                return record_batch.column(
-                    record_batch.schema.get_field_index(
-                        RAW_EXAMPLE_KEY)).flatten().to_pylist()
+            #   def _ExtractRawExampleBatches(record_batch):
+            #     return record_batch.column(
+            #         record_batch.schema.get_field_index(
+            #             RAW_EXAMPLE_KEY)).flatten().to_pylist()
 
-              # Make use of the fact that tf.SequenceExample is wire-format
-              # compatible with tf.Example
-              stats_input = []
-              for dataset in analyze_data_list:
-                infix = 'AnalysisIndex{}'.format(dataset.index)
-                stats_input.append(
-                    dataset.standardized
-                    | 'ExtractRawExampleBatches[{}]'.format(
-                        infix) >> beam.Map(_ExtractRawExampleBatches)
-                    | 'DecodeSequenceExamplesAsExamplesIntoRecordBatches[{}]'
-                    .format(infix) >> beam.ParDo(
-                        self._ToArrowRecordBatchesFn(schema_proto)))
-            else:
-              stats_input = [
-                  dataset.standardized for dataset in analyze_data_list
-              ]
+            #   # Make use of the fact that tf.SequenceExample is wire-format
+            #   # compatible with tf.Example
+            #   stats_input = []
+            #   for dataset in analyze_data_list:
+            #     infix = 'AnalysisIndex{}'.format(dataset.index)
+            #     stats_input.append(
+            #         dataset.standardized
+            #         | 'ExtractRawExampleBatches[{}]'.format(
+            #             infix) >> beam.Map(_ExtractRawExampleBatches)
+            #         | 'DecodeSequenceExamplesAsExamplesIntoRecordBatches[{}]'
+            #         .format(infix) >> beam.ParDo(
+            #             self._ToArrowRecordBatchesFn(schema_proto)))
+            # else:
+            #   stats_input = [
+            #       dataset.standardized for dataset in analyze_data_list
+            #   ]
+            stats_input = [
+                dataset.standardized for dataset in analyze_data_list
+            ]
 
             pre_transform_stats_options = _InvokeStatsOptionsUpdaterFn(
                 stats_options_updater_fn,
@@ -1593,8 +1597,7 @@ class TransformProcessor:
     Returns:
       True if data format should be decoded as raw example.
     """
-    return (self._IsDataFormatSequenceExample(data_format) or
-            (self._IsDataFormatProto(data_format) and data_view_uri is None))
+    return (self._IsDataFormatProto(data_format) and data_view_uri is None)
 
   @staticmethod
   def _IsDataFormatSequenceExample(data_format: int) -> bool:
@@ -1620,18 +1623,18 @@ class TransformProcessor:
     """
     return data_format == example_gen_pb2.FORMAT_PROTO
 
-  def _GetDesiredBatchSize(self, data_format: int) -> Optional[int]:
-    """Returns batch size.
+  # def _GetDesiredBatchSize(self, data_format: int) -> Optional[int]:
+  #   """Returns batch size.
 
-    Args:
-      data_format: One of the enums from example_gen_pb2.PayloadFormat.
+  #   Args:
+  #     data_format: One of the enums from example_gen_pb2.PayloadFormat.
 
-    Returns:
-      Batch size or None.
-    """
-    if self._IsDataFormatSequenceExample(data_format):
-      return 1
-    return None
+  #   Returns:
+  #     Batch size or None.
+  #   """
+  #   if self._IsDataFormatSequenceExample(data_format):
+  #     return 1
+  #   return None
 
   @staticmethod
   def _GetCacheSource():
